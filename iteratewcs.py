@@ -15,6 +15,7 @@ from xml.sax.saxutils import escape
 from xml.dom import minidom
 import CGIRunner
 import re
+import logging;
 
   
     
@@ -87,13 +88,16 @@ def callADAGUC(adagucexecutable,tmpdir,LOGFILE,url,filetogenerate):
   except:
     pass
   env["ADAGUC_LOGFILE"]=tmpdir+"/adaguclog.log"
-  return CGIRunner.CGIRunner().run([adagucexecutable],url,out = filetogenerate,extraenv=env)  
+  return CGIRunner.CGIRunner().run([adagucexecutable],url,out = filetogenerate,extraenv=env, isLocalADAGUC = True)  
 
 
+"""
+  Describecoverage is done in order to retrieve the avaible dates in the coverage
+"""
 def describeCoverage(adagucexecutable,tmpdir,LOGFILE,WCSURL,COVERAGE):
   
   filetogenerate = tmpdir+"/describecoverage.xml"
-  url = WCSURL + "REQUEST=DescribeCoverage&";
+  url = WCSURL + "&SERVICE=WCS&REQUEST=DescribeCoverage&";
   url = url + "COVERAGE="+COVERAGE+"&";
   status = callADAGUC(adagucexecutable,tmpdir,LOGFILE,url,filetogenerate);
   
@@ -111,7 +115,6 @@ def describeCoverage(adagucexecutable,tmpdir,LOGFILE,WCSURL,COVERAGE):
   except:
     adaguclog = openfile(tmpdir+"/adaguclog.log");
     raise ValueError ("Succesfully completed WCS DescribeCoverage, but no data found for "+url+"\n"+adaguclog+"\n");
-  #print(itemlist[0].childNodes)
   try:
     itemlist = xmldoc.getElementsByTagName('gml:timePosition')
     if(len(itemlist)!=0):
@@ -124,32 +127,36 @@ def describeCoverage(adagucexecutable,tmpdir,LOGFILE,WCSURL,COVERAGE):
       start_date = xmldoc.getElementsByTagName('gml:begin')[0].childNodes[0].nodeValue
       end_date = xmldoc.getElementsByTagName('gml:end')[0].childNodes[0].nodeValue
       res_date  = xmldoc.getElementsByTagName('gml:duration')[0].childNodes[0].nodeValue
-      print start_date
-      print end_date
-      print res_date
+      logging.debug(start_date);
+      logging.debug(end_date);
+      logging.debug(res_date);
       return list(daterange(isodate.parse_datetime(start_date),isodate.parse_datetime(end_date),isodate.parse_duration(res_date)));
   except:
     pass
   
   return []
+
+
+def defaultCallback(message,percentage):
+  return
   
 """
 This requires a working ADAGUC server in the PATH environment, ADAGUC_CONFIG environment variable must point to ADAGUC's config file.
 """
-def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=1,RESY=1,WCSURL="",TMP=".",COVERAGE="pr",LOGFILE=None,OUTFILE="out.nc",FORMAT="netcdf",callback=None):
+def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=None,RESY=None,WIDTH=None, HEIGHT= None,WCSURL="",TMP=".",COVERAGE="pr",LOGFILE=None,OUTFILE="out.nc",FORMAT="netcdf",CALLBACK=defaultCallback):
   adagucexecutable='adagucserver'
   
   """ Check if adagucserver is in the path """
   if(which(adagucexecutable) == None):
     raise ValueError("ADAGUC Executable '"+adagucexecutable+"' not found in PATH");
   
-  callback("Starting iterateWCS",1)
+  CALLBACK("Starting iterateWCS",1)
   tmpdir = TMP+"/iteratewcstmp";
   shutil.rmtree(tmpdir, ignore_errors=True)
   mkdir_p(tmpdir);
   
   """ Determine which dates to do based on describe coverage call"""
-  callback("Starting WCS DescribeCoverage",1)
+  CALLBACK("Starting WCS DescribeCoverage request",1)
   founddates = describeCoverage(adagucexecutable,tmpdir,LOGFILE,WCSURL,COVERAGE);
   
   start_date=""
@@ -159,10 +166,16 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=1,RESY=
     if len(TIME.split("/")) >= 2:
       start_date = isodate.parse_datetime(TIME.split("/")[0]);
       end_date = isodate.parse_datetime(TIME.split("/")[1]);
-
+    else:
+      if TIME == None or TIME == "*" or TIME == "None":
+        start_date = isodate.parse_datetime("0001-01-01T00:00:00Z");
+        end_date = isodate.parse_datetime("9999-01-01T00:00:00Z");
+      else:
+        start_date = isodate.parse_datetime(TIME);
+        end_date = isodate.parse_datetime(TIME);
   
   
-  callback("File has "+str(len(founddates))+" dates",1)
+  CALLBACK("File has "+str(len(founddates))+" dates",1)
   datestodo = []
   
   
@@ -173,7 +186,7 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=1,RESY=
   else:
     datestodo.append("*");
   
-  callback("Found "+str(len(datestodo))+" dates",1)
+  CALLBACK("Found "+str(len(datestodo))+" dates",1)
   
   if(len(datestodo) == 0):
     raise ValueError("No data found in resource for given dates. Possible date range should be within "+str(founddates[0])+" and "+str(founddates[-1]))
@@ -182,31 +195,42 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=1,RESY=
   numdatestodo=len(datestodo);
   datesdone = 0;
   filetogenerate = ""
-  callback("Starting Iterating WCS GetCoverage",1)
-  """ Make the WCS GetCoverage calls """
-  for single_date in datestodo:
- 
+  CALLBACK("Starting Iterating WCS GetCoverage",1)
+  
+  def makeGetCoverage(single_date):
     filetime=""
     wcstime=""
+    messagetime = ""
     
-    
-    url = WCSURL + "REQUEST=GetCoverage&";
+    url = WCSURL + "&SERVICE=WCS&REQUEST=GetCoverage&";
     url = url + "FORMAT="+urllib.quote_plus(FORMAT)+"&";
     url = url + "COVERAGE="+urllib.quote_plus(COVERAGE)+"&";
-    if single_date != "*":
-      wcstime=time.strftime("%Y-%m-%dT%H:%M:%SZ", single_date.timetuple())
-      filetime=time.strftime("%Y%m%dT%H%M%SZ", single_date.timetuple())
-      url = url + "TIME="+urllib.quote_plus(wcstime)+"&";
+    
+    logging.debug("WCS GetCoverage URL: "+str(url));
+    
+    for j in range(0,len(single_date)):
+      wcsdate = single_date[j]
+      if wcsdate != "*":
+        if(j>0):
+          wcstime=wcstime + ","
+        wcstime=wcstime + time.strftime("%Y-%m-%dT%H:%M:%SZ", wcsdate.timetuple())
+        filetime=time.strftime("%Y%m%dT%H%M%SZ", single_date[0].timetuple()) + '-'  + time.strftime("%Y%m%dT%H%M%SZ", single_date[-1].timetuple())
+        messagetime=time.strftime("%Y%m%dT%H%M%SZ", single_date[0].timetuple()) 
+        url = url + "TIME="+urllib.quote_plus(wcstime)+"&";
+        
         
     url = url + "BBOX="+BBOX+"&";
-    url = url + "RESX="+str(RESX)+"&";
-    url = url + "RESY="+str(RESY)+"&";
+    if RESX != None:
+      url = url + "RESX="+str(RESX)+"&";
+    if RESY != None:
+      url = url + "RESY="+str(RESY)+"&";
+    if WIDTH != None:
+      url = url + "WIDTH="+str(WIDTH)+"&";
+    if HEIGHT != None:
+      url = url + "HEIGHT="+str(HEIGHT)+"&";
+      
     url = url + "CRS="+urllib.quote_plus(CRS)+"&";
-    
-
-    
- 
-    
+    logging.debug(url);
     filetogenerate = tmpdir+"/file"+filetime
     
     if(FORMAT == "netcdf"):
@@ -226,29 +250,42 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=1,RESY=
       adaguclog = openfile(tmpdir+"/adaguclog.log");
       raise ValueError ("Succesfully completed WCS GetCoverage, but no data found for "+url+"\n"+adaguclog+"\n");
    
-    if(callback==None):
+    if(CALLBACK==None):
       print str(int((float(datesdone)/numdatestodo)*90.))
     else:
-      callback(wcstime,((float(datesdone)/float(numdatestodo))*90.))
-        
-        
-    datesdone=datesdone+1;
+      CALLBACK(messagetime,((float(datesdone)/float(numdatestodo))*90.))
+    return filetogenerate
   
+  """ Make the WCS GetCoverage calls """
+  grouped_dates = []
+  numberOfDatesInGroup = 0;
+  maxRequestsAtOnce = 8
+  for single_date in datestodo:
+    grouped_dates.append(single_date) 
+    datesdone=datesdone+1;
+    if (len(grouped_dates) >= maxRequestsAtOnce):
+      filetogenerate = makeGetCoverage(grouped_dates)    
+      grouped_dates = []
+    
+  if len(grouped_dates) > 0:
+    filetogenerate = makeGetCoverage(grouped_dates)
  
   def monitor2(line):
     dolog(tmpdir,line);
     try:
       data = json.loads(line)
-      if(callback == None):
+      if(CALLBACK == None):
         print float(data["percentage"])*(1./10)+90
       else:
-        callback(data["message"],float(data["percentage"])*(1./10)+90)
+        CALLBACK(data["message"],float(data["percentage"])*(1./10)+90)
     except:
-      callback(line,50)
+      CALLBACK(line,50)
   
   
   """ If it is netcdf, make a new big netcdf file """
   if(FORMAT == "netcdf"):
+    if datesdone == 1:
+      shutil.copyfile(filetogenerate ,OUTFILE)
     if datesdone > 1:
       cleanlog(tmpdir);
       dolog(tmpdir,tmpdir)
@@ -263,14 +300,12 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=1,RESY=
         data = getlog(tmpdir)
         
         raise ValueError('Unable to aggregate: statuscode='+str(status)+"\n"+data)
-    else:
-      shutil.copyfile(filetogenerate ,OUTFILE)
       
   else:
     makezip(tmpdir,OUTFILE)
     
     
-    
+  logging.debug("Writing to "+str(OUTFILE));  
   shutil.rmtree(tmpdir, ignore_errors=True)  
   return 0
   
