@@ -19,6 +19,7 @@ class CGIRunner:
     self.headersSent = False
     self.foundLF = False
     
+ 
   def startProcess(self,cmds,callback=None,env = None,bufsize=0):
     try:
         from Queue import Queue, Empty
@@ -94,31 +95,41 @@ class CGIRunner:
               break;
       else:
         writefunction(_message)
-    
-        
-  def run(self,cmds,url,out,extraenv = []):
+ 
+ 
+  """
+    Behaves like a dynamic webserver. Run executables in webserver environment and can strip the headers from the response
+    isLocalADAGUC sets ADAGUC_WRITETOFILE where the results will be written, normaly ADAGUC writes to stdout. 
+  """  
+  def run(self,cmds,url,out,extraenv = [], isLocalADAGUC = False):
     try:
       os.remove(out)
     except:
       pass
-    ncout = open(out,"a+b")
-   
-    self.headersSent = False
-    self.foundLF = False
     
-    def writefunction(data):
-      ncout.write(data)
+    if(isLocalADAGUC == True):
+      env = os.environ.copy()
+      env['QUERY_STRING']=url
+      env['ADAGUC_WRITETOFILE']=out
+      env.update(extraenv)  
+      from subprocess import call
+      status = call(cmds, stdin=None, stdout=None, stderr=None, shell=False, env=env)
+    else:
+      ncout = open(out,"a+b")
     
-    def monitor1(_message):
-      self.filterHeader(_message,writefunction)
-    
-    env = os.environ.copy()
-    env['QUERY_STRING']=url
-    
-    env.update(extraenv)  
-    #print url
-    status = self.startProcess(cmds,monitor1,env,bufsize=8192)
-    
-    ncout.close()
-   
+      self.headersSent = False
+      self.foundLF = False
+      
+      def writefunction(data):
+        ncout.write(data)
+      
+      def monitor1(_message):
+        self.filterHeader(_message,writefunction)
+      
+      env = os.environ.copy()
+      env['QUERY_STRING']=url
+      env.update(extraenv)  
+      status = self.startProcess(cmds,monitor1,env,bufsize=8192)
+      ncout.close()
+      
     return status

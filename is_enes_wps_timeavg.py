@@ -2,13 +2,13 @@ from pywps.Process import WPSProcess
 
 import icclim
 import icclim.util.callback as callback
-
+import logging
 import dateutil.parser
 from datetime import datetime
 import os
 from os.path import expanduser
 from mkdir_p import *
-
+home = expanduser("~")
 transfer_limit_Mb = 100
 
     
@@ -17,41 +17,23 @@ class ProcessSimpleIndice(WPSProcess):
 
     def __init__(self):
         WPSProcess.__init__(self,
-                            identifier = 'clipc_simpleindicator_execute', # only mandatary attribute = same file name
-                            title = 'CLIPC ICCLIM simple indicator calculator Execute',
-                            abstract = 'Using ICCLIM, single input indices of temperature TG, TX, TN, TXx, TXn, TNx, TNn, SU, TR, CSU, GD4, FD, CFD, ID, HD17; of rainfall: CDD, CWD, RR, RR1, SDII, R10mm, R20mm, RX1day, RX5day; and of snowfall: SD, SD1, SD5, SD50 can be computed.',
+                            identifier = 'is_enes_wps_timeavg', # only mandatary attribute = same file name
+                            title = 'ICCLIM Time Averaging',
+                            abstract = 'Computes time averages for any parameter by month, year of various seasons using ICCLIM. Please select the right variable and time range for the given input file. With this process it is for example possible to create yearly averages from daily data.  The result is written to your basket and can be used in new processes.',
                             version = "1.0",
                             storeSupported = True,
                             statusSupported = True,
                             grassLocation =False)
 
 
-        self.indiceNameIn = self.addLiteralInput(identifier = 'indiceName',
-                                               title = 'Indicator name',
-                                               abstract = 'The indicator to calculate' ,
-                                               type="String",
-                                               default = 'SU')        
-
-        self.indiceNameIn.values = ["TG","TX","TN","TXx","TXn","TNx","TNn","SU","TR","CSU","GD4","FD","CFD","ID","HD17","CDD","CWD","PRCPTOT","RR1","SDII","R10mm","R20mm","RX1day","RX5day","SD","SD1","SD5cm","SD50cm"]
-
-
         self.sliceModeIn = self.addLiteralInput(identifier = 'sliceMode',
-                                              title = 'Time slice mode',
+                                              title = 'Slice mode (temporal grouping to apply for calculations)',
                                               abstract = 'Selects temporal grouping to apply for calculations',
                                               type="String",
-                                              default = 'year')
-        self.sliceModeIn.values = ["year","month","ONDJFM","AMJJAS","DJF","MAM","JJA","SON"]
+                                              default = 'None')
+        self.sliceModeIn.values = ["None","year","month","ONDJFM","AMJJAS","DJF","MAM","JJA","SON"]
 
 
-        self.thresholdIn = self.addLiteralInput(identifier = 'threshold', 
-                                               title = 'Indicator threshold',
-                                               abstract = 'Threshold(s) for certain indices (SU, CSU and TR). Input can be a single numer or a number range, e.g. for SU this can be "20" or "20,21,22"  degrees Celsius. None will use the default threshold as indicated by ICCLIM.',
-                                               type=type("S"),
-                                               minOccurs=0,
-                                               maxOccurs=1024,
-                                               default = 'None')
-
-       
         self.filesIn = self.addLiteralInput(identifier = 'wpsnetcdfinput_files',
                                                title = 'Input filelist',
                                                abstract="The input filelist to calculate the mean values for. The inputs need to be accessible by opendap URL's. It is also possible to select from the basket a catalog containing multiple files. The catalog will then be expanded to multiple files.",
@@ -59,20 +41,19 @@ class ProcessSimpleIndice(WPSProcess):
                                                minOccurs=0,
                                                maxOccurs=1024,
                                                default = 'http://opendap.knmi.nl/knmi/thredds/dodsC/IS-ENES/TESTSETS/tasmax_day_EC-EARTH_rcp26_r8i1p1_20060101-20251231.nc')
-        
                                                 
         self.varNameIn = self.addLiteralInput(identifier = 'wpsvariable_varName~wpsnetcdfinput_files',
-                                               title = 'Input variable name',
+                                               title = 'Variable name to process',
                                                abstract = 'Variable name to process as specified in your input files.',
                                                type="String",
                                                default = 'tasmax')
         
 
         self.timeRangeIn = self.addLiteralInput(identifier = 'wpstimerange_timeRange~wpsnetcdfinput_files', 
-                                               title =  'Time range',
+                                               title = 'A start/stop time range',
                                                abstract = 'Time range, e.g. 2010-01-01/2012-12-31. If None is selected, all dates in the file will be processed.',
                                                type="String",
-                                                default = 'None')
+                                               default = 'None')
         
         self.outputFileNameIn = self.addLiteralInput(identifier = 'wpsnetcdfoutput_outputFileName', 
                                                title = 'Name of output netCDF file',
@@ -81,8 +62,7 @@ class ProcessSimpleIndice(WPSProcess):
         
         
         self.NLevelIn = self.addLiteralInput(identifier = 'wpsnlevel_NLevel~wpsnetcdfinput_files', 
-                                               title = 'Model level number',
-                                               abstract = 'The model level from your input data, in case you have 4D variables in your input data',
+                                               title = 'Number of level (if 4D variable)',
                                                type="String",
                                                default = 'None')
 
@@ -94,8 +74,8 @@ class ProcessSimpleIndice(WPSProcess):
     
     def execute(self):
         # Very important: This allows the NetCDF library to find the users credentials (X509 cert)
-        homedir = os.environ['HOME']
-        os.chdir(homedir)
+        tmpFolderPath=os.getcwd()
+        os.chdir(home)
         
         def callback(b):
           self.callback("Processing",b)
@@ -103,17 +83,16 @@ class ProcessSimpleIndice(WPSProcess):
         files = [];
         files.extend(self.filesIn.getValue())
         var = self.varNameIn.getValue()
-        indice_name = self.indiceNameIn.getValue()
         slice_mode = self.sliceModeIn.getValue()
         time_range = self.timeRangeIn.getValue()
         out_file_name = self.outputFileNameIn.getValue()
         level = self.NLevelIn.getValue()
-        thresholdlist = self.thresholdIn.getValue()
-        thresh = None
         
         if(level == "None"):
             level = None
-            
+        
+        if(slice_mode == "None"):
+            slice_mode = None            
           
         if(time_range == "None"):
             time_range = None
@@ -121,15 +100,7 @@ class ProcessSimpleIndice(WPSProcess):
             startdate = dateutil.parser.parse(time_range.split("/")[0])
             stopdate  = dateutil.parser.parse(time_range.split("/")[1])
             time_range = [startdate,stopdate]
-            
-          
-        if(thresholdlist != "None"):
-            if(thresholdlist[0]!="None"):
-                thresh = []
-                for threshold in thresholdlist:
-                    thresh.append(float(threshold))
-        
-      
+     
         self.status.set("Preparing....", 0)
         
         pathToAppendToOutputDirectory = "/WPS_"+self.identifier+"_" + datetime.now().strftime("%Y%m%dT%H%M%SZ")
@@ -146,25 +117,69 @@ class ProcessSimpleIndice(WPSProcess):
 
         self.status.set("Processing input list: "+str(files),0)
         
-        icclim.indice(indice_name=indice_name,
-                        in_files=files,
-                        var_name=var,
-                        slice_mode=slice_mode,
-                        time_range=time_range,
-                        out_file=fileOutPath+out_file_name,
-                        threshold=thresh,
-                        N_lev=level,
-                        transfer_limit_Mbytes=transfer_limit_Mb,
-                        callback=callback,
-                        callback_percentage_start_value=0,
-                        callback_percentage_total=100,
-                        base_period_time_range=None,
-                        window_width=5,
-                        only_leap_years=False,
-                        ignore_Feb29th=True,
-                        interpolation='hyndman_fan',
-                        netcdf_version='NETCDF4_CLASSIC',
-                        out_unit='days')
+        my_indice_params = {'indice_name': 'TIMEAVG',
+                            'calc_operation': 'mean'
+                           }
+        
+        
+        from netCDF4 import Dataset
+        dataset = Dataset(files[0]) 
+        isMember = False
+        memberIndex = 12
+        try:
+          for a in range(0,dataset.variables["member"].shape[0]):
+            isMember = True
+            logging.debug("Checking index " +str(a))
+            logging.debug("Has value "+str(dataset.variables["member"][a]))
+            memberValue = str("".join(dataset.variables["member"][a]))
+            logging.debug(memberValue)
+            if memberValue=="median":
+              memberIndex=a
+        except:
+          pass
+        
+        if isMember == True:
+          logging.debug("IS Member data")
+          logging.debug("Using memberIndex "+str(memberIndex))
+          icclim.indice(user_indice=my_indice_params, 
+                          in_files=files,
+                          var_name=var,
+                          slice_mode=slice_mode,
+                          time_range=time_range,
+                          out_file=fileOutPath+out_file_name,
+                          threshold=None,
+                          N_lev=memberIndex,
+                          lev_dim_pos=0,
+                          #transfer_limit_Mbytes=transfer_limit_Mb,
+                          callback=callback,
+                          callback_percentage_start_value=0,
+                          callback_percentage_total=100,
+                          base_period_time_range=None,
+                          window_width=5,
+                          only_leap_years=False,
+                          ignore_Feb29th=True,
+                          interpolation='hyndman_fan',
+                          out_unit='days')
+        else:
+          icclim.indice(user_indice=my_indice_params, 
+                          in_files=files,
+                          var_name=var,
+                          slice_mode=slice_mode,
+                          time_range=time_range,
+                          out_file=fileOutPath+out_file_name,
+                          threshold=None,
+                          N_lev=level,
+                          transfer_limit_Mbytes=transfer_limit_Mb,
+                          callback=callback,
+                          callback_percentage_start_value=0,
+                          callback_percentage_total=100,
+                          base_period_time_range=None,
+                          window_width=5,
+                          only_leap_years=False,
+                          ignore_Feb29th=True,
+                          interpolation='hyndman_fan',
+                          out_unit='days')
+
         
         """ Set output """
         url = fileOutURL+"/"+out_file_name;

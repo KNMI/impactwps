@@ -1,5 +1,5 @@
 from datetime import datetime
-from icclim import *
+
 from pywps.Process import WPSProcess
 from os.path import expanduser
 import logging;
