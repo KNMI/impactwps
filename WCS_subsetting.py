@@ -1,3 +1,4 @@
+
 from datetime import datetime
 
 from pywps.Process import WPSProcess
@@ -96,7 +97,7 @@ class Process(WPSProcess):
         FORMAT = self.outputFormat.getValue();
         status = -1
         try:
-          status = iteratewcs.iteratewcs(TIME=TIME,BBOX=BBOX,CRS=CRS,WCSURL=WCSURL,RESX=RESX,RESY=RESY,COVERAGE=self.coverage.getValue(),TMP=tmpFolderPath,OUTFILE=fileOutPath+"/"+outputfile,FORMAT=FORMAT,LOGFILE=tmpFolderPath+"/adagucerrlog.txt",callback=callback)
+          status = iteratewcs.iteratewcs(TIME=TIME,BBOX=BBOX,CRS=CRS,WCSURL=WCSURL,RESX=RESX,RESY=RESY,COVERAGE=self.coverage.getValue(),TMP=tmpFolderPath,OUTFILE=fileOutPath+"/"+outputfile,FORMAT=FORMAT,LOGFILE=tmpFolderPath+"/adagucerrlog.txt",CALLBACK=callback)
         except Exception as e:
           return "Iterate over WCS Failed:\n "+str(e).replace('&','&amp;')
           
