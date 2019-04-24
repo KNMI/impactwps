@@ -16,7 +16,7 @@ from xml.dom import minidom
 import CGIRunner
 import re
 import logging;
-
+#logging.basicConfig(level=logging.DEBUG)
   
     
 def daterange(start_date, end_date, delta):
@@ -253,13 +253,15 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=None,RE
     if(CALLBACK==None):
       print str(int((float(datesdone)/numdatestodo)*90.))
     else:
-      CALLBACK(messagetime,((float(datesdone)/float(numdatestodo))*90.))
+      CALLBACK("Processing %s " % messagetime,((float(datesdone)/float(numdatestodo))*90.))
     return filetogenerate
   
   """ Make the WCS GetCoverage calls """
   grouped_dates = []
   numberOfDatesInGroup = 0;
-  maxRequestsAtOnce = 8
+  maxRequestsAtOnce = 1
+  if(FORMAT == "netcdf"):
+    maxRequestsAtOnce = 8
   for single_date in datestodo:
     grouped_dates.append(single_date) 
     datesdone=datesdone+1;
@@ -277,7 +279,7 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=None,RE
       if(CALLBACK == None):
         print float(data["percentage"])*(1./10)+90
       else:
-        CALLBACK(data["message"],float(data["percentage"])*(1./10)+90)
+        CALLBACK("Processing % " % data["message"],float(data["percentage"])*(1./10)+90)
     except:
       CALLBACK(line,50)
   
@@ -302,7 +304,8 @@ def iteratewcs(TIME = "",BBOX = "-180,-90,180,90",CRS = "EPSG:4326",RESX=None,RE
         raise ValueError('Unable to aggregate: statuscode='+str(status)+"\n"+data)
       
   else:
-    makezip(tmpdir,OUTFILE)
+    CALLBACK("zipping to %s" % (OUTFILE), 95);
+    makezip(tmpdir, os.path.abspath(OUTFILE))
     
     
   logging.debug("Writing to "+str(OUTFILE));  
